@@ -3,6 +3,7 @@ import { computed, nextTick, provide, reactive, ref, useTemplateRef, watch } fro
 import type { CodesJson, GlobalProps, Item, Link, SearchResult } from './common';
 import { timeOrDefault, Action, inUse, inUseRange, encodeLink, decodeLink, exposeItem } from './common';
 import TreeItem from './components/TreeItem.vue';
+import EvolutionGraph from './components/EvolutionGraph.vue';
 import codesUrl from '../../codes.json?url';
 
 const root = ref<Item>({
@@ -21,12 +22,12 @@ const guide: Item = {
   children: [
     {
       code: 1,
-      name: "圆括号内为在用时间",
+      name: "灰色标签为在用时间",
       start: 1980,
     },
     {
       code: 2,
-      name: "灰色为弃用代码",
+      name: "灰色划线为弃用代码",
       start: 1970,
       end: 1980,
     },
@@ -43,7 +44,7 @@ const guide: Item = {
     },
     {
       code: 5,
-      name: "点击蓝色框内数字查看变更描述",
+      name: "点击蓝色方括号内数字查看变更描述",
       start: 0,
     },
     {
@@ -64,6 +65,28 @@ const options = reactive({
   hidePredecessors: false,
   searchText: "",
 });
+
+const view = ref<'list' | 'graph'>(localStorage.getItem('view') == 'graph' ? 'graph' : 'list');
+watch(view, v => localStorage.setItem('view', v));
+
+const theme = ref(localStorage.getItem('theme') ?? 'auto');
+function applyTheme() {
+  if (theme.value == 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = theme.value;
+}
+applyTheme();
+watch(theme, v => {
+  if (v == 'auto') localStorage.removeItem('theme');
+  else localStorage.setItem('theme', v);
+  applyTheme();
+});
+function cycleTheme() {
+  theme.value = theme.value == 'auto' ? 'dark' : theme.value == 'dark' ? 'light' : 'auto';
+}
+const themeLabel = computed(() => ({ auto: '跟随系统', dark: '深色', light: '浅色' } as Record<string, string>)[theme.value]);
+
+const dataEnd = ref(2025);
+const loading = ref(true);
 
 const items = new Map<number, Item[]>();
 const predecessors = new Map<number, Link[]>();
@@ -243,6 +266,7 @@ const props: GlobalProps = {
   predecessors,
   descriptions,
   searchResult,
+  dataEnd,
   resolve,
   pushHistory,
   scrollToDesc,
@@ -259,9 +283,16 @@ fetch(codesUrl)
       descriptions.set(parseInt(time), arr);
     }
 
+    let end = 0;
+    items.forEach(arr => arr.forEach(it => {
+      if (it.code >= 100000) end = Math.max(end, it.start, it.end ?? 0);
+    }));
+    dataEnd.value = end;
+
     createIndex();
     followHash();
     root.value.children = resp.items;
+    loading.value = false;
   });
 
 function insertItem(item: Item, parent?: Item) {
@@ -341,6 +372,10 @@ function binarySearch<T>(arr: T[], f: (t: T) => number): number {
 
 window.onhashchange = followHash;
 
+function commitHash() {
+  location.hash = encodeURI(options.searchText);
+}
+
 function followHash() {
   options.searchText = decodeURIComponent(location.hash.substring(1));
 }
@@ -367,56 +402,172 @@ function render(time: number, desc: number): string {
 </script>
 
 <template>
-  <header>
-    <h1><a href="">行政区划代码数据集</a></h1>
-    <a title="GitHub" href="https://github.com/yescallop/areacodes">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 16 16">
-        <path fill-rule="evenodd"
-          d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
-      </svg>
+  <header class="topbar">
+    <a class="brand" href="">
+      <span class="logo" aria-hidden="true">区</span>
+      <span>
+        <span class="title">行政区划代码数据集</span>
+        <span class="subtitle">1981–{{ dataEnd }} 年县级以上区划代码及新旧对应关系</span>
+      </span>
     </a>
-    <fieldset id="options">
-      <legend>选项</legend>
-      <label><input type="checkbox" v-model="options.hideSuccessors" />隐藏后继</label>
-      <label><input type="checkbox" v-model="options.hidePredecessors" />隐藏前身</label>
-    </fieldset>
-    <ul class="tree" id="guide">
-      <TreeItem :item="guide" />
-    </ul>
-  </header>
-  <main>
-    <div id="search-bar">
-      <label><a class="button" :href="'#' + encodeURI(options.searchText)">搜索</a>：<input type="search" v-model="options.searchText" />
-      </label>
-      <a v-if="history.length" class="button" href="javascript:" @click="popHistory">[&lt;]</a>
+    <div class="topbar-actions">
+      <button class="icon-btn" type="button" :title="`主题：${themeLabel}`" @click="cycleTheme">
+        <svg v-if="theme == 'dark'" viewBox="0 0 24 24" width="18" height="18"><path fill="currentColor" d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>
+        <svg v-else-if="theme == 'light'" viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="4.5" fill="currentColor"/><g stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></g></svg>
+        <svg v-else viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="9" fill="none" stroke="currentColor" stroke-width="2"/><path fill="currentColor" d="M12 3a9 9 0 0 1 0 18z"/></svg>
+      </button>
+      <a class="icon-btn" title="GitHub" href="https://github.com/yescallop/areacodes">
+        <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 16 16">
+          <path fill="currentColor" fill-rule="evenodd"
+            d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z" />
+        </svg>
+      </a>
     </div>
-    <div id="spacer"></div>
-    <article ref="desc"
+  </header>
+
+  <div id="search-bar">
+    <div class="search-row">
+      <button v-if="history.length" class="icon-btn back" type="button" title="返回上一步" @click="popHistory">
+        <svg viewBox="0 0 24 24" width="18" height="18"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M15 18l-6-6 6-6"/></svg>
+      </button>
+      <label class="search-box">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true"><circle cx="11" cy="11" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M20 20l-3.5-3.5"/></svg>
+        <input type="search" v-model="options.searchText" placeholder="名称前缀、6 位代码，或年份如 2019."
+          aria-label="搜索" @keydown.enter="commitHash" />
+        <a class="share" :href="'#' + encodeURI(options.searchText)" title="生成可分享链接">链接</a>
+      </label>
+    </div>
+    <div class="tool-row">
+      <div class="segmented" role="tablist">
+        <button type="button" role="tab" :aria-selected="view == 'list'" :class="{ active: view == 'list' }"
+          @click="view = 'list'">树状列表</button>
+        <button type="button" role="tab" :aria-selected="view == 'graph'" :class="{ active: view == 'graph' }"
+          @click="view = 'graph'">演变图</button>
+      </div>
+      <label class="chip"><input type="checkbox" v-model="options.hideSuccessors" />隐藏后继</label>
+      <label class="chip"><input type="checkbox" v-model="options.hidePredecessors" />隐藏前身</label>
+    </div>
+  </div>
+  <div id="spacer"></div>
+
+  <main>
+    <article ref="desc" class="desc-card"
       v-if="searchResult?.time && searchResult.desc != undefined"
       v-html="render(searchResult.time, searchResult.desc)" />
-    <ul class="tree" id="root">
+
+    <section v-if="!options.searchText" class="guide-card">
+      <ul class="tree" id="guide">
+        <TreeItem :item="guide" />
+      </ul>
+      <p class="examples">
+        试试：
+        <a href="#杭州">杭州</a>
+        <a href="#330183">330183</a>
+        <a href="#哈密">哈密</a>
+        <a href="#330183,1994">330183,1994</a>
+        <a href="#2019.">2019.</a>
+      </p>
+    </section>
+
+    <EvolutionGraph v-if="view == 'graph'" />
+
+    <div v-if="loading" class="loading">正在加载数据…</div>
+    <ul v-show="view == 'list'" class="tree tree-card" id="root">
       <TreeItem :item="root" />
     </ul>
   </main>
+  <footer class="footer">
+    数据以 <a href="https://creativecommons.org/publicdomain/zero/1.0/deed.zh-hans">CC0 1.0</a> 发布 ·
+    <a href="https://raw.githubusercontent.com/yescallop/areacodes/master/result.csv">CSV</a> ·
+    <a href="https://raw.githubusercontent.com/yescallop/areacodes/master/codes.json">JSON</a>
+  </footer>
 </template>
 
 <style>
+:root {
+  --font-sans: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Noto Sans SC", "Microsoft YaHei", sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Roboto Mono", Menlo, Consolas, monospace;
+  --radius: 12px;
+
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --text: #1c2330;
+  --muted: #6b7380;
+  --border: #e3e6eb;
+  --grid: #eef0f3;
+  --hover: #f1f4f9;
+  --accent: #2563eb;
+  --accent-soft: #e8efff;
+  --succ: #15803d;
+  --pred: #c2410c;
+  --transfer: #d97706;
+  --c-county: #3b82f6;
+  --c-prefecture: #8b5cf6;
+  --c-province: #0f766e;
+  --shadow: 0 1px 2px rgb(16 24 40 / 6%), 0 1px 3px rgb(16 24 40 / 6%);
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #0f1216;
+    --surface: #171b21;
+    --text: #e6e9ee;
+    --muted: #9099a6;
+    --border: #2a3039;
+    --grid: #222830;
+    --hover: #1f252d;
+    --accent: #7aa2ff;
+    --accent-soft: #1e2a44;
+    --succ: #4ade80;
+    --pred: #fb923c;
+    --transfer: #fbbf24;
+    --c-county: #60a5fa;
+    --c-prefecture: #a78bfa;
+    --c-province: #2dd4bf;
+    --shadow: none;
+    color-scheme: dark;
+  }
+}
+
+:root[data-theme="dark"] {
+  --bg: #0f1216;
+  --surface: #171b21;
+  --text: #e6e9ee;
+  --muted: #9099a6;
+  --border: #2a3039;
+  --grid: #222830;
+  --hover: #1f252d;
+  --accent: #7aa2ff;
+  --accent-soft: #1e2a44;
+  --succ: #4ade80;
+  --pred: #fb923c;
+  --transfer: #fbbf24;
+  --c-county: #60a5fa;
+  --c-prefecture: #a78bfa;
+  --c-province: #2dd4bf;
+  --shadow: none;
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
 html {
-  scroll-padding-top: 44px;
+  scroll-padding-top: 120px;
+  background: var(--bg);
 }
 
 body {
-  font-family: 'Roboto Mono', 'Noto Sans SC';
-}
-
-h1 {
-  display: inline-block;
-  margin: 8px;
-  font-size: x-large;
-}
-
-h2 {
-  font-size: large;
+  margin: 0 auto;
+  max-width: 1080px;
+  padding: 0 16px 32px;
+  font-family: var(--font-sans);
+  color: var(--text);
+  background: var(--bg);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -424,89 +575,326 @@ a {
   text-decoration: none;
 }
 
-article {
-  font-family: 'Noto Sans SC';
-}
-
-article a {
-  color: darkblue;
-}
-
 a:hover {
   text-decoration: underline;
 }
 
-a:focus {
-  outline: none;
-  box-shadow:
-    0 0 0 1px #4dabf7,
-    0 0 3px #4dabf7;
-  border-radius: 2px;
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+button {
+  font: inherit;
+  color: inherit;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 0 12px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.brand:hover {
+  text-decoration: none;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #2563eb, #7c3aed);
+  color: #fff;
+  font-weight: 700;
+  font-size: 20px;
+  flex: none;
+}
+
+.title {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: .01em;
+}
+
+.subtitle {
+  display: block;
+  font-size: .85rem;
+  color: var(--muted);
+}
+
+.topbar-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.icon-btn:hover {
+  background: var(--hover);
+  color: var(--text);
+  text-decoration: none;
+}
+
+#search-bar {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  margin: 0 -16px;
+  padding: 10px 16px;
+  background: color-mix(in srgb, var(--bg) 85%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+
+.search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.search-box {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 44px;
+  padding: 0 6px 0 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  color: var(--muted);
+}
+
+.search-box:focus-within {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.search-box input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 1rem;
+}
+
+.share {
+  font-size: .8rem;
+  padding: 4px 10px;
+  border-radius: 8px;
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.share:hover {
+  text-decoration: none;
+  filter: brightness(.97);
+}
+
+.tool-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.segmented {
+  display: inline-flex;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--grid);
+}
+
+.segmented button {
+  border: 0;
+  background: transparent;
+  padding: 4px 12px;
+  border-radius: 8px;
+  font-size: .875rem;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.segmented button.active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-size: .85rem;
+  color: var(--muted);
+  cursor: pointer;
+  user-select: none;
+  background: var(--surface);
+}
+
+.chip:has(input:checked) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.chip input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#spacer {
+  height: calc(100dvh - 120px);
+  margin-bottom: calc(120px - 100dvh);
+  position: sticky;
+  top: 120px;
+  z-index: -1;
+}
+
+.guide-card,
+.tree-card,
+.desc-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin: 12px 0;
+}
+
+.guide-card {
+  padding: 8px 12px;
+}
+
+.examples {
+  margin: 4px 0 4px 4px;
+  font-size: .875rem;
+  color: var(--muted);
+}
+
+.examples a {
+  display: inline-block;
+  margin: 2px 4px;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: var(--grid);
+  color: var(--text);
+  font-family: var(--font-mono);
+}
+
+.examples a:hover {
+  text-decoration: none;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.desc-card {
+  padding: 4px 20px 8px;
+  line-height: 1.75;
+}
+
+.desc-card h2 {
+  font-size: 1.05rem;
+}
+
+.desc-card a {
+  color: var(--accent);
 }
 
 .tree {
   list-style-type: none;
   padding-left: 0;
-  margin: 8px 0;
+  margin: 0;
 }
 
 .tree ul {
   list-style-type: none;
-  padding-left: 1ch;
+  padding-left: 1.25rem;
+  margin: 0;
+  border-left: 1px solid var(--grid);
+  margin-left: 9px;
 }
 
-#guide {
-  margin-top: 8px;
-  margin-bottom: 0;
-  /* Make the focus ring appear above the search bar */
-  position: relative;
-  z-index: 1;
+#root > li > ul {
+  border-left: 0;
+  margin-left: 0;
+  padding-left: 0;
+}
+
+.tree-card {
+  padding: 8px 8px 8px 4px;
+  overflow-x: auto;
 }
 
 #guide rt {
   display: none;
 }
 
-#root {
-  margin-left: -1ch;
+.loading {
+  margin: 24px 0;
+  text-align: center;
+  color: var(--muted);
 }
 
-a.button:not(:first-child) {
-  margin-left: 1ch;
+.footer {
+  margin-top: 24px;
+  text-align: center;
+  font-size: .8rem;
+  color: var(--muted);
 }
 
-a.button {
-  color: darkblue;
+.footer a {
+  color: var(--accent);
 }
 
-#options {
-  width: fit-content;
-}
+@media (max-width: 600px) {
+  body {
+    padding: 0 10px 24px;
+  }
 
-#options label:not(:last-child) {
-  margin-right: 1ch;
-}
+  #search-bar {
+    margin: 0 -10px;
+    padding: 8px 10px;
+  }
 
-#search-bar {
-  margin: 0 -8px;
-  padding: 8px;
-  border-bottom: 1px solid gray;
-  position: sticky;
-  top: 0;
-  background: white;
-}
+  .subtitle {
+    display: none;
+  }
 
-#spacer {
-  height: calc(100dvh - 42px);
-  margin-bottom: calc(42px - 100dvh);
-  position: sticky;
-  top: 42px;
-  z-index: -1;
-}
-
-article {
-  margin: 0 -8px;
-  padding: 0 8px;
-  border-bottom: 1px solid gray;
+  .title {
+    font-size: 1.1rem;
+  }
 }
 </style>
