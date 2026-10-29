@@ -56,6 +56,11 @@ const guide: Item = {
       code: 7,
       name: "支持名称前缀、完整代码搜索",
       start: 0,
+    },
+    {
+      code: 8,
+      name: "虚线框“市辖区”为统计用分组，非实际行政区，数据未收录",
+      start: 0,
     }
   ]
 };
@@ -290,10 +295,39 @@ fetch(codesUrl)
     dataEnd.value = end;
 
     createIndex();
+    shuffleExamples();
     followHash();
     root.value.children = resp.items;
     loading.value = false;
   });
+
+const examples = ref<string[]>(["杭州", "330183", "哈密", "330183,1994", "2019."]);
+
+function pick<T>(arr: T[]): T {
+  return arr[Math.floor(Math.random() * arr.length)]!;
+}
+
+// 从数据中随机生成“试试”示例：名称、完整代码、代码+年份、年份变更。
+function shuffleExamples() {
+  const all: Item[] = [];
+  items.forEach(arr => arr.forEach(it => { if (it.code >= 100000) all.push(it); }));
+  if (all.length == 0) return;
+  const changed = all.filter(it => it.end != undefined && it.succ?.length);
+  const named = all.filter(it => it.code % 100 == 0 && it.code % 10000 != 0);
+  const out = new Set<string>();
+  const add = (s: string) => { if (s) out.add(s); };
+  let guard = 0;
+  while (out.size < 5 && guard++ < 50) {
+    switch (out.size) {
+      case 0: add(pick(named).name.replace(/(市|地区|盟|自治州)$/, '')); break;
+      case 1: add(String(pick(all).code)); break;
+      case 2: add(pick(all).name.replace(/(市|县|区|自治县|旗)$/, '') || ''); break;
+      case 3: { const it = pick(changed); add(`${it.code},${it.start}`); break; }
+      default: { const it = pick(changed); add(`${it.end}.`); break; }
+    }
+  }
+  examples.value = [...out];
+}
 
 function insertItem(item: Item, parent?: Item) {
   let arr = items.get(item.code);
@@ -461,11 +495,8 @@ function render(time: number, desc: number): string {
       </ul>
       <p class="examples">
         试试：
-        <a href="#杭州">杭州</a>
-        <a href="#330183">330183</a>
-        <a href="#哈密">哈密</a>
-        <a href="#330183,1994">330183,1994</a>
-        <a href="#2019.">2019.</a>
+        <a v-for="ex in examples" :key="ex" :href="`#${ex}`">{{ ex }}</a>
+        <button class="shuffle" type="button" title="换一批" @click="shuffleExamples">↻</button>
       </p>
     </section>
 
@@ -812,6 +843,19 @@ button {
   background: var(--grid);
   color: var(--text);
   font-family: var(--font-mono);
+}
+
+.examples .shuffle {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.examples .shuffle:hover {
+  color: var(--accent);
 }
 
 .examples a:hover {

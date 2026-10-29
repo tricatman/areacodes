@@ -21,6 +21,38 @@ const children = computed(() => props.item.children?.filter(item => {
   return res == undefined || res.items.has(toRaw(item));
 }) ?? []);
 
+// 地级市（代码第 3-4 位为 01-20）下的市辖区：数据集不收录 xx01“市辖区”统计代码，
+// 这里在前端虚拟出一个分组，仅用于展示。
+function isDistrict(it: Item): boolean {
+  if (it.code < 100000) return false;
+  const suffix = it.code % 100;
+  if (!it.name.endsWith('区') || /(特区|林区)$/.test(it.name)) return false;
+  return (suffix >= 1 && suffix <= 20) || (suffix >= 51 && suffix <= 80);
+}
+
+const isPrefecture = computed(() => {
+  const code = props.item.code;
+  if (code < 100000 || code % 100 != 0 || code % 10000 == 0) return false;
+  const mid = Math.trunc(code / 100) % 100;
+  return mid >= 1 && mid <= 20;
+});
+
+const districts = computed(() =>
+  isPrefecture.value ? children.value.filter(isDistrict) : []);
+const others = computed(() =>
+  districts.value.length > 0 ? children.value.filter(it => !isDistrict(it)) : children.value);
+
+const groupOpen = ref(true);
+const group = computed(() => {
+  const list = districts.value;
+  if (list.length == 0) return undefined;
+  const code = props.item.code + 1;
+  const start = Math.min(...list.map(it => it.start));
+  const end = list.some(it => it.end == undefined) ? undefined : Math.max(...list.map(it => it.end!));
+  const taken = gProps.items.get(code)?.some(it => !isDistrict(it) || it.parent == toRaw(props.item));
+  return { code: taken ? undefined : code, start, end };
+});
+
 const isHit = computed(() => {
   const res = gProps.searchResult.value;
   return res != undefined && res.time == undefined &&
@@ -164,7 +196,18 @@ function onClick() {
     </div>
     <LinkGroup :link-zips="linkZips" />
     <ul v-if="isOpen">
-      <TreeItem v-for="it in children" :item="it" :key="it.code * 10000 + it.start" />
+      <li v-if="group" class="vgroup">
+        <div class="row" :class="{ obsolete: group.end }" title="市辖区为统计用分组代码，并非实际行政区，数据集未收录">
+          <span class="toggle" :class="{ open: groupOpen }" @click="groupOpen = !groupOpen" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 6l6 6-6 6"/></svg>
+          </span>
+          <span class="vlabel" @click="groupOpen = !groupOpen"><span v-if="group.code" class="code">{{ group.code }}</span><span class="name">市辖区</span><span class="tag">统计用</span><span class="years">{{ `${group.start}-${group.end ?? ''}` }}</span></span>
+        </div>
+        <ul v-if="groupOpen">
+          <TreeItem v-for="it in districts" :item="it" :key="it.code * 10000 + it.start" />
+        </ul>
+      </li>
+      <TreeItem v-for="it in others" :item="it" :key="it.code * 10000 + it.start" />
     </ul>
   </li>
 </template>
@@ -253,5 +296,37 @@ function onClick() {
 
 .toggle.open {
   transform: rotate(90deg);
+}
+.vgroup > .row {
+  border: 1px dashed var(--border, color-mix(in srgb, var(--muted) 45%, transparent));
+  margin: 1px 0;
+}
+
+.vlabel {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 2px 4px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.vlabel .name {
+  font-style: italic;
+  color: var(--muted);
+}
+
+.vgroup > .row.obsolete .name {
+  text-decoration: line-through;
+}
+
+.tag {
+  font-size: .7em;
+  color: var(--muted);
+  border: 1px solid currentColor;
+  border-radius: 4px;
+  padding: 0 4px;
+  opacity: .8;
 }
 </style>
