@@ -38,6 +38,47 @@ interface Edge {
   desc?: number,
   /** The source stays in use after the change (area transfer only). */
   transfer: boolean,
+  /** Inferred from where the subordinate counties went; not in the data. */
+  inferred?: number,
+}
+
+function isPrefecture(item?: Item): item is Item {
+  return item != undefined && item.code % 100 == 0 && item.code % 10000 != 0;
+}
+
+/**
+ * 数据只给县级记录了去向，地级（如徽州地区→黄山市）常常没有直接关联。
+ * 这里按下辖区县的实际去向推断地级之间的关联：某年 P 的下辖区县划入 Q，
+ * 且当年 P 撤销或 Q 新设，就画一条 P→Q 的推断连线。
+ */
+function inferPrefectureEdges(item: Item, resolve: GlobalProps['resolve'],
+  predecessors: GlobalProps['predecessors']): Edge[] {
+  const counts = new Map<string, { src: Item, dst: Item, time: number, n: number }>();
+  const add = (src: Item, dst: Item, time: number) => {
+    if (src == dst || !(src.end == time || dst.start == time)) return;
+    const key = `${src.code},${src.start}>${dst.code},${dst.start}@${time}`;
+    const e = counts.get(key);
+    if (e) e.n += 1;
+    else counts.set(key, { src, dst, time, n: 1 });
+  };
+  for (const child of item.children ?? []) {
+    // 下辖区县划出
+    for (const link of child.succ ?? []) {
+      const time = link.time ?? child.end!;
+      const q = resolve(link.code, time)?.parent;
+      if (isPrefecture(q)) add(item, q, time);
+    }
+    // 下辖区县由别处划入
+    for (const link of predecessors.get(child.code) ?? []) {
+      const time = link.time!;
+      if (time < child.start || (child.end != undefined && time >= child.end)) continue;
+      const p = resolve(link.code, time - 1)?.parent;
+      if (isPrefecture(p)) add(p, item, time);
+    }
+  }
+  return [...counts.values()].map(({ src, dst, time, n }) => ({
+    src, dst, time, inferred: n, transfer: src.end == undefined || src.end > time,
+  }));
 }
 
 const graph = computed(() => {
@@ -58,6 +99,20 @@ const graph = computed(() => {
     nodes.add(dst);
     const desc = src.succ?.find(l => l.code == dstCode && (l.time ?? src.end) == time)?.desc;
     edges.push({ src, dst, time, desc, transfer: src.end == undefined || src.end > time });
+  }
+
+  // 补上数据里缺失的地级关联
+  const has = new Set(edges.map(e => `${e.src.code},${e.src.start}>${e.dst.code},${e.dst.start}`));
+  for (const item of [...nodes]) {
+    if (!isPrefecture(item)) continue;
+    for (const e of inferPrefectureEdges(item, gProps.resolve, gProps.predecessors)) {
+      const key = `${e.src.code},${e.src.start}>${e.dst.code},${e.dst.start}`;
+      if (has.has(key)) continue;
+      has.add(key);
+      nodes.add(e.src);
+      nodes.add(e.dst);
+      edges.push(e);
+    }
   }
 
   if (nodes.size == 0 || nodes.size > MAX_NODES) {
@@ -167,6 +222,7 @@ function selectEdge(e: Edge) {
         <span><i class="swatch province" />省级</span>
         <span><i class="line" />代码变更</span>
         <span><i class="line transfer" />区域划转</span>
+        <span><i class="line inferred" />地级关联（按下辖区县推断）</span>
       </div>
       <div class="scroller">
         <svg :width="width" :height="height" :viewBox="`0 0 ${width} ${height}`" role="img"
@@ -179,9 +235,9 @@ function selectEdge(e: Edge) {
           </g>
           <g class="edges">
             <path v-for="(e, i) in graph.edges" :key="i" :d="edgePath(e)"
-              :class="{ transfer: e.transfer, dim: !isConnected(e), clickable: e.desc != undefined }"
+              :class="{ transfer: e.transfer, inferred: e.inferred, dim: !isConnected(e), clickable: e.desc != undefined }"
               @click="selectEdge(e)">
-              <title>{{ e.src.name }} → {{ e.dst.name }}（{{ e.time }}）{{ e.desc != undefined ? '，点击查看变更描述' : '' }}</title>
+              <title>{{ e.src.name }} → {{ e.dst.name }}（{{ e.time }}）{{ e.inferred ? `，推断：${e.inferred} 个下辖区县的去向` : '' }}{{ e.desc != undefined ? '，点击查看变更描述' : '' }}</title>
             </path>
           </g>
           <g v-for="it in graph.order" :key="it.code * 10000 + it.start" class="node"
@@ -253,6 +309,10 @@ function selectEdge(e: Edge) {
   border-top: 2px dashed var(--transfer);
 }
 
+.line.inferred {
+  border-top: 2px dotted var(--muted);
+}
+
 .scroller {
   overflow-x: auto;
 }
@@ -283,6 +343,12 @@ svg {
 .edges path.transfer {
   stroke: var(--transfer);
   stroke-dasharray: 4 3;
+}
+
+.edges path.inferred {
+  stroke: var(--muted);
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
 }
 
 .edges path.clickable {
