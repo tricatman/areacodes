@@ -35,26 +35,50 @@ const filteredLinkZips = computed(() => {
 <template>
   <ul v-if="filteredLinkZips.length" class="links">
     <li v-for="linkZip in filteredLinkZips" :class="{ rev: linkZip.rev }" :key="linkZip.time">
-      {{ linkZip.rev ? "<=" : "=>" }}
+      <span class="arrow">{{ linkZip.rev ? "←" : "→" }}</span>
       <template v-for="(it, index) in linkZip.items" :key="it.item.code">
         <template v-if="index != 0">,<wbr /></template>
         <LinkItem :item="it.item" :enabled="it.enabled"
           :desc="it.desc != undefined ? [linkZip.time, it.desc] : undefined"
           :show-desc="it.showDesc" />
       </template>
-      &lt;{{ linkZip.time }}&gt;
+      <span class="time">{{ linkZip.time }}</span>
     </li>
   </ul>
 </template>
 
 <style scoped>
 .links {
-  color: darkgreen;
-  margin-left: 7ch;
-  text-indent: -3ch;
+  list-style: none;
+  color: var(--succ);
+  margin: 0 0 2px 26px;
+  padding: 0;
+  font-size: .9em;
+  font-family: var(--font-mono);
+}
+
+.links li {
+  padding-left: 1.4em;
+  text-indent: -1.4em;
 }
 
 .links li.rev {
-  color: darkred;
+  color: var(--pred);
+}
+
+.arrow {
+  display: inline-block;
+  width: 1.4em;
+  text-indent: 0;
+  font-weight: 700;
+}
+
+.time {
+  margin-left: 6px;
+  font-size: .8em;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--grid);
+  color: var(--muted);
 }
 </style>

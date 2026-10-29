@@ -10,6 +10,7 @@ export interface GlobalProps {
   predecessors: Map<number, Link[]>,
   descriptions: Map<number, string[]>,
   searchResult: Ref<SearchResult | undefined>,
+  dataEnd: Ref<number>,
   resolve: (code: number, time: number) => Item | undefined,
   pushHistory: (item: Item) => void,
   scrollToDesc: () => void,

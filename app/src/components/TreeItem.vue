@@ -155,12 +155,12 @@ function onClick() {
 
 <template>
   <li>
-    <div v-if="!item.root" :class="{ obsolete: item.end, leaf: !isFolder, hit: isHit }">
-      <span v-if="isFolder" class="toggle" @click="isOpen = !isOpen">[{{ isOpen ? '-' : '+' }}]</span>
+    <div v-if="!item.root" class="row" :class="{ obsolete: item.end, leaf: !isFolder, hit: isHit, guide: item.guide }">
+      <span v-if="isFolder" class="toggle" :class="{ open: isOpen }" @click="isOpen = !isOpen" aria-hidden="true">
+        <svg viewBox="0 0 24 24" width="14" height="14"><path fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" d="M9 6l6 6-6 6"/></svg>
+      </span>
       <a ref="headLink" href="javascript:"
-        @click="onClick" @keydown="onKeyDown">{{ item.code }} {{ item.name }}
-        <template v-if="item.start">{{ ` (${item.start}-${item.end ?? ''})` }}</template>
-      </a>
+        @click="onClick" @keydown="onKeyDown"><span v-if="item.code >= 100000" class="code">{{ item.code }}</span><span class="name">{{ item.name }}</span><span v-if="item.start" class="years">{{ `${item.start}-${item.end ?? ''}` }}</span></a>
     </div>
     <LinkGroup :link-zips="linkZips" />
     <ul v-if="isOpen">
@@ -170,26 +170,88 @@ function onClick() {
 </template>
 
 <style scoped>
-div {
-  text-indent: -4ch;
-  margin-left: 4ch;
+.row {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+  padding: 1px 6px 1px 0;
+  border-radius: 6px;
 }
 
-.hit>a {
-  font-weight: 600;
+.row:hover {
+  background: var(--hover);
 }
 
-.obsolete {
-  color: gray;
+.row.leaf {
+  padding-left: 22px;
 }
 
-.leaf {
-  text-indent: 0;
-  margin-left: 4ch;
+.row a {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 8px;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.row a:hover {
+  text-decoration: none;
+}
+
+.row a:hover .name {
+  color: var(--accent);
+}
+
+.code {
+  font-family: var(--font-mono);
+  font-size: .85em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.years {
+  font-size: .75em;
+  color: var(--muted);
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--grid);
+  font-variant-numeric: tabular-nums;
+}
+
+.guide .years {
+  display: none;
+}
+
+.hit .name {
+  font-weight: 650;
+  color: var(--accent);
+}
+
+.hit {
+  background: var(--accent-soft);
+}
+
+.obsolete .name {
+  color: var(--muted);
+  text-decoration: line-through;
+  text-decoration-color: color-mix(in srgb, var(--muted) 50%, transparent);
 }
 
 .toggle {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  align-self: center;
+  color: var(--muted);
+  cursor: pointer;
   user-select: none;
-  margin-right: 1ch;
+  transition: transform .15s;
+}
+
+.toggle.open {
+  transform: rotate(90deg);
 }
 </style>

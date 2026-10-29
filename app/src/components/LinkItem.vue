@@ -62,12 +62,16 @@ rt {
   }
 }
 
+rt {
+  font-family: var(--font-sans);
+}
+
 .desc {
   user-select: none;
-  color: darkblue;
+  color: var(--accent);
 }
 
 .disabled {
-  color: gray;
+  color: var(--muted);
 }
 </style>
